@@ -1,31 +1,53 @@
 "use client";
 
-import { PreviewMessage } from "@/components/message";
-import { getDesktopURL } from "@/lib/sandbox/utils";
-import { useScrollToBottom } from "@/lib/use-scroll-to-bottom";
-import { useChat } from "@ai-sdk/react";
-import { useEffect, useState } from "react";
-import { Input } from "@/components/input";
-import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
-import { DeployButton, ProjectInfo } from "@/components/project-info";
-import { AISDKLogo } from "@/components/icons";
-import { PromptSuggestions } from "@/components/prompt-suggestions";
+import { useState, useCallback, useEffect } from "react";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { ABORTED } from "@/lib/utils";
+import { EventProvider, SessionProvider, useEventContext, useSessionContext } from "@/lib/store";
+import { useSandbox, useChatSession } from "@/lib/hooks";
+import { useScrollToBottom } from "@/lib/use-scroll-to-bottom";
+import { ChatPanel, RightPanel, MobileSidebar, MobileVNCModal } from "@/components/panels";
 
-export default function Chat() {
-  // Create separate refs for mobile and desktop to ensure both scroll properly
-  const [desktopContainerRef, desktopEndRef] = useScrollToBottom();
-  const [mobileContainerRef, mobileEndRef] = useScrollToBottom();
+function LoadingSpinner() {
+  return (
+    <div className="flex h-dvh items-center justify-center bg-white">
+      <div className="flex flex-col items-center gap-3">
+        <div className="relative">
+          <div className="w-10 h-10 border-4 border-zinc-200 rounded-full" />
+          <div className="w-10 h-10 border-4 border-zinc-800 border-t-transparent rounded-full animate-spin absolute top-0 left-0" />
+        </div>
+        <span className="text-sm text-zinc-500">Loading...</span>
+      </div>
+    </div>
+  );
+}
 
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [streamUrl, setStreamUrl] = useState<string | null>(null);
-  const [sandboxId, setSandboxId] = useState<string | null>(null);
+function DashboardContent() {
+  const [chatContainerRef, chatEndRef] = useScrollToBottom();
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobileVNCOpen, setIsMobileVNCOpen] = useState(false);
+  const [expandedScreenshot, setExpandedScreenshot] = useState<string | null>(null);
+
+  const {
+    sessions,
+    activeSessionId,
+    activeSession,
+    isHydrated,
+    createSession,
+    switchSession,
+    updateSessionMessages,
+    updateSessionSandboxId,
+  } = useSessionContext();
+
+  const { clearEvents, setActiveSession, isHydrated: isEventHydrated } = useEventContext();
+
+  const { isInitializing, streamUrl, refreshDesktop } = useSandbox({
+    activeSessionId,
+    updateSessionSandboxId,
+  });
 
   const {
     messages,
@@ -33,280 +55,142 @@ export default function Chat() {
     handleInputChange,
     handleSubmit,
     status,
-    stop: stopGeneration,
+    isLoading,
+    stop,
     append,
-    setMessages,
-  } = useChat({
-    api: "/api/chat",
-    id: sandboxId ?? undefined,
-    body: {
-      sandboxId,
-    },
-    maxSteps: 30,
-    onError: (error) => {
-      console.error(error);
-      toast.error("There was an error", {
-        description: "Please try again later.",
-        richColors: true,
-        position: "top-center",
-      });
-    },
+    resetMessages,
+    chatKey,
+  } = useChatSession({
+    activeSessionId,
+    activeSession,
+    sandboxId: null,
+    createSession,
+    updateSessionMessages,
+    setActiveSession,
   });
 
-  const stop = () => {
-    stopGeneration();
+  const handleCreateSession = useCallback(() => {
+    clearEvents();
+    createSession();
+    resetMessages([]);
+  }, [clearEvents, createSession, resetMessages]);
 
-    const lastMessage = messages.at(-1);
-    const lastMessageLastPart = lastMessage?.parts.at(-1);
-    if (
-      lastMessage?.role === "assistant" &&
-      lastMessageLastPart?.type === "tool-invocation"
-    ) {
-      setMessages((prev) => [
-        ...prev.slice(0, -1),
-        {
-          ...lastMessage,
-          parts: [
-            ...lastMessage.parts.slice(0, -1),
-            {
-              ...lastMessageLastPart,
-              toolInvocation: {
-                ...lastMessageLastPart.toolInvocation,
-                state: "result",
-                result: ABORTED,
-              },
-            },
-          ],
-        },
-      ]);
-    }
-  };
-
-  const isLoading = status !== "ready";
-
-  const refreshDesktop = async () => {
-    try {
-      setIsInitializing(true);
-      const { streamUrl, id } = await getDesktopURL(sandboxId || undefined);
-      // console.log("Refreshed desktop connection with ID:", id);
-      setStreamUrl(streamUrl);
-      setSandboxId(id);
-    } catch (err) {
-      console.error("Failed to refresh desktop:", err);
-    } finally {
-      setIsInitializing(false);
-    }
-  };
-
-  // Kill desktop on page close
-  useEffect(() => {
-    if (!sandboxId) return;
-
-    // Function to kill the desktop - just one method to reduce duplicates
-    const killDesktop = () => {
-      if (!sandboxId) return;
-
-      // Use sendBeacon which is best supported across browsers
-      navigator.sendBeacon(
-        `/api/kill-desktop?sandboxId=${encodeURIComponent(sandboxId)}`,
-      );
-    };
-
-    // Detect iOS / Safari
-    const isIOS =
-      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-
-    // Choose exactly ONE event handler based on the browser
-    if (isIOS || isSafari) {
-      // For Safari on iOS, use pagehide which is most reliable
-      window.addEventListener("pagehide", killDesktop);
-
-      return () => {
-        window.removeEventListener("pagehide", killDesktop);
-        // Also kill desktop when component unmounts
-        killDesktop();
-      };
-    } else {
-      // For all other browsers, use beforeunload
-      window.addEventListener("beforeunload", killDesktop);
-
-      return () => {
-        window.removeEventListener("beforeunload", killDesktop);
-        // Also kill desktop when component unmounts
-        killDesktop();
-      };
-    }
-  }, [sandboxId]);
+  const handleSwitchSession = useCallback(
+    (id: string) => {
+      if (id === activeSessionId) return;
+      
+      setActiveSession(id);
+      switchSession(id);
+      const session = sessions.find((s) => s.id === id);
+      resetMessages(session?.messages ?? []);
+    },
+    [setActiveSession, switchSession, sessions, activeSessionId, resetMessages]
+  );
 
   useEffect(() => {
-    // Initialize desktop and get stream URL when the component mounts
-    const init = async () => {
-      try {
-        setIsInitializing(true);
+    if (isHydrated && isEventHydrated && activeSessionId) {
+      setActiveSession(activeSessionId);
+    }
+  }, [isHydrated, isEventHydrated, activeSessionId, setActiveSession]);
 
-        // Use the provided ID or create a new one
-        const { streamUrl, id } = await getDesktopURL(sandboxId ?? undefined);
-
-        setStreamUrl(streamUrl);
-        setSandboxId(id);
-      } catch (err) {
-        console.error("Failed to initialize desktop:", err);
-        toast.error("Failed to initialize desktop");
-      } finally {
-        setIsInitializing(false);
-      }
-    };
-
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  if (!isHydrated) {
+    return <LoadingSpinner />;
+  }
 
   return (
     <div className="flex h-dvh relative">
-      {/* Mobile/tablet banner */}
-      <div className="flex items-center justify-center fixed left-1/2 -translate-x-1/2 top-5 shadow-md text-xs mx-auto rounded-lg h-8 w-fit bg-blue-600 text-white px-3 py-2 text-left z-50 xl:hidden">
-        <span>Headless mode</span>
-      </div>
-
-      {/* Resizable Panels */}
-      <div className="w-full hidden xl:block">
+      <div className="hidden lg:flex h-full w-full">
         <ResizablePanelGroup direction="horizontal" className="h-full">
-          {/* Desktop Stream Panel */}
           <ResizablePanel
-            defaultSize={70}
-            minSize={40}
-            className="bg-black relative items-center justify-center"
+            defaultSize={50}
+            minSize={30}
+            className="flex flex-col border-r border-zinc-200 bg-white"
           >
-            {streamUrl ? (
-              <>
-                <iframe
-                  src={streamUrl}
-                  className="w-full h-full"
-                  style={{
-                    transformOrigin: "center",
-                    width: "100%",
-                    height: "100%",
-                  }}
-                  allow="autoplay"
-                />
-                <Button
-                  onClick={refreshDesktop}
-                  className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 text-white px-3 py-1 rounded text-sm z-10"
-                  disabled={isInitializing}
-                >
-                  {isInitializing ? "Creating desktop..." : "New desktop"}
-                </Button>
-              </>
-            ) : (
-              <div className="flex items-center justify-center h-full text-white">
-                {isInitializing
-                  ? "Initializing desktop..."
-                  : "Loading stream..."}
-              </div>
-            )}
+            <ChatPanel
+              key={chatKey}
+              messages={messages}
+              input={input}
+              status={status}
+              isInitializing={isInitializing}
+              isLoading={isLoading}
+              chatContainerRef={chatContainerRef}
+              chatEndRef={chatEndRef}
+              isMobileSidebarOpen={isMobileSidebarOpen}
+              onCreateSession={handleCreateSession}
+              onSwitchSession={handleSwitchSession}
+              onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+              onOpenMobileVNC={() => setIsMobileVNCOpen(true)}
+              handleInputChange={handleInputChange}
+              handleSubmit={handleSubmit}
+              stop={stop}
+              append={append}
+              onScreenshotClick={setExpandedScreenshot}
+            />
           </ResizablePanel>
 
           <ResizableHandle withHandle />
 
-          {/* Chat Interface Panel */}
-          <ResizablePanel
-            defaultSize={30}
-            minSize={25}
-            className="flex flex-col border-l border-zinc-200"
-          >
-            <div className="bg-white py-4 px-4 flex justify-between items-center">
-              <AISDKLogo />
-              <DeployButton />
-            </div>
-
-            <div
-              className="flex-1 space-y-6 py-4 overflow-y-auto px-4"
-              ref={desktopContainerRef}
-            >
-              {messages.length === 0 ? <ProjectInfo /> : null}
-              {messages.map((message, i) => (
-                <PreviewMessage
-                  message={message}
-                  key={message.id}
-                  isLoading={isLoading}
-                  status={status}
-                  isLatestMessage={i === messages.length - 1}
-                />
-              ))}
-              <div ref={desktopEndRef} className="pb-2" />
-            </div>
-
-            {messages.length === 0 && (
-              <PromptSuggestions
-                disabled={isInitializing}
-                submitPrompt={(prompt: string) =>
-                  append({ role: "user", content: prompt })
-                }
-              />
-            )}
-            <div className="bg-white">
-              <form onSubmit={handleSubmit} className="p-4">
-                <Input
-                  handleInputChange={handleInputChange}
-                  input={input}
-                  isInitializing={isInitializing}
-                  isLoading={isLoading}
-                  status={status}
-                  stop={stop}
-                />
-              </form>
-            </div>
+          <ResizablePanel defaultSize={50} minSize={30} className="flex flex-col">
+            <RightPanel
+              streamUrl={streamUrl}
+              isInitializing={isInitializing}
+              expandedScreenshot={expandedScreenshot}
+              onRefresh={refreshDesktop}
+              onClearScreenshot={() => setExpandedScreenshot(null)}
+            />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
 
-      {/* Mobile View (Chat Only) */}
-      <div className="w-full xl:hidden flex flex-col">
-        <div className="bg-white py-4 px-4 flex justify-between items-center">
-          <AISDKLogo />
-          <DeployButton />
-        </div>
-
-        <div
-          className="flex-1 space-y-6 py-4 overflow-y-auto px-4"
-          ref={mobileContainerRef}
-        >
-          {messages.length === 0 ? <ProjectInfo /> : null}
-          {messages.map((message, i) => (
-            <PreviewMessage
-              message={message}
-              key={message.id}
-              isLoading={isLoading}
-              status={status}
-              isLatestMessage={i === messages.length - 1}
-            />
-          ))}
-          <div ref={mobileEndRef} className="pb-2" />
-        </div>
-
-        {messages.length === 0 && (
-          <PromptSuggestions
-            disabled={isInitializing}
-            submitPrompt={(prompt: string) =>
-              append({ role: "user", content: prompt })
-            }
-          />
-        )}
-        <div className="bg-white">
-          <form onSubmit={handleSubmit} className="p-4">
-            <Input
-              handleInputChange={handleInputChange}
-              input={input}
-              isInitializing={isInitializing}
-              isLoading={isLoading}
-              status={status}
-              stop={stop}
-            />
-          </form>
-        </div>
+      <div className="lg:hidden h-full w-full flex flex-col border-r border-zinc-200 bg-white">
+        <ChatPanel
+          key={`mobile-${chatKey}`}
+          messages={messages}
+          input={input}
+          status={status}
+          isInitializing={isInitializing}
+          isLoading={isLoading}
+          chatContainerRef={chatContainerRef}
+          chatEndRef={chatEndRef}
+          isMobileSidebarOpen={isMobileSidebarOpen}
+          onCreateSession={handleCreateSession}
+          onSwitchSession={handleSwitchSession}
+          onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+          onOpenMobileVNC={() => setIsMobileVNCOpen(true)}
+          handleInputChange={handleInputChange}
+          handleSubmit={handleSubmit}
+          stop={stop}
+          append={append}
+          onScreenshotClick={setExpandedScreenshot}
+        />
       </div>
+
+      <MobileSidebar
+        isOpen={isMobileSidebarOpen}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onClose={() => setIsMobileSidebarOpen(false)}
+        onCreateSession={handleCreateSession}
+        onSwitchSession={handleSwitchSession}
+      />
+
+      <MobileVNCModal
+        isOpen={isMobileVNCOpen}
+        streamUrl={streamUrl}
+        isInitializing={isInitializing}
+        onClose={() => setIsMobileVNCOpen(false)}
+        onRefresh={refreshDesktop}
+      />
     </div>
+  );
+}
+
+export default function Chat() {
+  return (
+    <SessionProvider>
+      <EventProvider>
+        <DashboardContent />
+      </EventProvider>
+    </SessionProvider>
   );
 }

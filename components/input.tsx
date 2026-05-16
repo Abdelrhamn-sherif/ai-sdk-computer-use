@@ -1,4 +1,4 @@
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Square } from "lucide-react";
 import { Input as ShadcnInput } from "./ui/input";
 
 interface InputProps {
@@ -14,10 +14,13 @@ export const Input = ({
   input,
   handleInputChange,
   isInitializing,
-  isLoading,
   status,
   stop,
 }: InputProps) => {
+  const isStreaming = status === "streaming" || status === "submitted";
+  const isDisabled = isInitializing;
+  const isSubmitDisabled = isStreaming || !input.trim() || isInitializing;
+
   return (
     <div className="relative w-full">
       <ShadcnInput
@@ -26,38 +29,23 @@ export const Input = ({
         autoFocus
         placeholder={"Tell me what to do..."}
         onChange={handleInputChange}
-        disabled={isLoading || isInitializing}
+        disabled={isDisabled}
       />
-      {status === "streaming" || status === "submitted" ? (
+      {isStreaming ? (
         <button
           type="button"
           onClick={stop}
-          className="cursor-pointer absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-2 bg-black hover:bg-zinc-800 disabled:bg-zinc-300 disabled:cursor-not-allowed transition-colors"
+          className="cursor-pointer absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-2 bg-red-500 hover:bg-red-600 active:bg-red-700 transition-colors"
+          aria-label="Stop generation"
         >
-          <div className="animate-spin h-4 w-4">
-            <svg className="h-4 w-4 text-white" viewBox="0 0 24 24">
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-                fill="none"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              />
-            </svg>
-          </div>
+          <Square className="h-4 w-4 text-white fill-white" />
         </button>
       ) : (
         <button
           type="submit"
-          disabled={isLoading || !input.trim() || isInitializing}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-2 bg-black hover:bg-zinc-800 disabled:bg-zinc-300 disabled:cursor-not-allowed transition-colors"
+          disabled={isSubmitDisabled}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-2 bg-black hover:bg-zinc-800 active:bg-zinc-700 disabled:bg-zinc-300 disabled:cursor-not-allowed transition-colors"
+          aria-label="Send message"
         >
           <ArrowUp className="h-4 w-4 text-white" />
         </button>
