@@ -178,12 +178,11 @@ const ToolCallDisplay = memo(function ToolCallDisplay({ event, onClose }: ToolCa
 });
 
 export const ToolCallDetailsPanel = memo(function ToolCallDetailsPanel() {
-  const { getSelectedEvent, selectEvent, eventCounts } = useEventContext();
+  const { selectedEvent, selectToolCall, eventCounts } = useEventContext();
 
-  const event = getSelectedEvent();
-  const handleClose = useCallback(() => selectEvent(null), [selectEvent]);
+  const handleClose = useCallback(() => selectToolCall(null), [selectToolCall]);
 
-  if (!event) {
+  if (!selectedEvent) {
     return (
       <div className="p-4 border-b border-zinc-200 bg-white">
         <h3 className="text-sm font-semibold mb-3">Tool Call Details</h3>
@@ -195,5 +194,9 @@ export const ToolCallDetailsPanel = memo(function ToolCallDetailsPanel() {
     );
   }
 
-  return <ToolCallDisplay event={event} onClose={handleClose} />;
+  return (
+    <div className="max-h-[51vh] overflow-auto">
+      <ToolCallDisplay event={selectedEvent} onClose={handleClose} />
+    </div>
+  );
 });

@@ -6,18 +6,19 @@ import { useEventStore } from "./event-store";
 
 interface EventContextValue {
   events: ToolCallEvent[];
-  selectedEventId: string | null;
+  selectedToolCallId: string | null;
+  selectedEvent: ToolCallEvent | null;
   isHydrated: boolean;
   setActiveSession: (sessionId: string | null) => void;
   addEvent: (event: Omit<ToolCallEvent, "id" | "timestamp">) => string;
   updateEvent: (id: string, updates: Partial<ToolCallEvent>) => void;
-  selectEvent: (id: string | null) => void;
+  upsertEvent: (event: Omit<ToolCallEvent, "id" | "timestamp">) => string;
+  selectToolCall: (toolCallId: string | null) => void;
   clearEvents: () => void;
   clearAllSessionEvents: (sessionId: string) => void;
   eventCounts: EventCounts;
   agentStatus: AgentStatus;
   getEventById: (id: string) => ToolCallEvent | undefined;
-  getSelectedEvent: () => ToolCallEvent | null;
 }
 
 const EventContext = createContext<EventContextValue | null>(null);
@@ -28,33 +29,35 @@ export function EventProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       events: store.events,
-      selectedEventId: store.selectedEventId,
+      selectedToolCallId: store.selectedToolCallId,
+      selectedEvent: store.selectedEvent,
       isHydrated: store.isHydrated,
       setActiveSession: store.setActiveSession,
       addEvent: store.addEvent,
       updateEvent: store.updateEvent,
-      selectEvent: store.selectEvent,
+      upsertEvent: store.upsertEvent,
+      selectToolCall: store.selectToolCall,
       clearEvents: store.clearEvents,
       clearAllSessionEvents: store.clearAllSessionEvents,
       eventCounts: store.eventCounts,
       agentStatus: store.agentStatus,
       getEventById: store.getEventById,
-      getSelectedEvent: store.getSelectedEvent,
     }),
     [
       store.events,
-      store.selectedEventId,
+      store.selectedToolCallId,
+      store.selectedEvent,
       store.isHydrated,
       store.setActiveSession,
       store.addEvent,
       store.updateEvent,
-      store.selectEvent,
+      store.upsertEvent,
+      store.selectToolCall,
       store.clearEvents,
       store.clearAllSessionEvents,
       store.eventCounts,
       store.agentStatus,
       store.getEventById,
-      store.getSelectedEvent,
     ]
   );
 

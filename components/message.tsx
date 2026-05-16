@@ -23,7 +23,6 @@ import {
   StopCircle,
   Expand,
 } from "lucide-react";
-import { useRef } from "react";
 
 interface PreviewMessageProps {
   message: Message;
@@ -83,24 +82,20 @@ function PreviewMessageInner({
   status,
   onScreenshotClick,
 }: PreviewMessageProps) {
-  const { addEvent, selectEvent, selectedEventId } = useEventContext();
-  const processedRef = useRef<Set<string>>(new Set());
+  const { upsertEvent, selectToolCall, selectedToolCallId } = useEventContext();
 
   useEffect(() => {
     message.parts?.forEach((part) => {
       if (part.type !== "tool-invocation") return;
       
       const { toolName, toolCallId, state, args } = part.toolInvocation;
-      const eventKey = `${toolCallId}-${state}`;
-      if (processedRef.current.has(eventKey)) return;
       if (toolName !== "computer" && toolName !== "bash") return;
       
-      processedRef.current.add(eventKey);
       const result = state === "result" ? part.toolInvocation.result : undefined;
       const now = Date.now();
 
       if (toolName === "computer") {
-        addEvent({
+        upsertEvent({
           type: "computer_tool",
           toolCallId,
           action: args.action as ComputerAction,
@@ -118,7 +113,7 @@ function PreviewMessageInner({
           result: result as ComputerToolCallEvent["result"],
         } as Omit<ComputerToolCallEvent, "id" | "timestamp">);
       } else {
-        addEvent({
+        upsertEvent({
           type: "bash_tool",
           toolCallId,
           status: state === "call" ? "running" : "completed",
@@ -130,9 +125,9 @@ function PreviewMessageInner({
         } as Omit<BashToolCallEvent, "id" | "timestamp">);
       }
     });
-  }, [message.parts, message.id, addEvent]);
+  }, [message.parts, message.id, upsertEvent]);
 
-  const handleSelect = useCallback((id: string) => selectEvent(id), [selectEvent]);
+  const handleSelect = useCallback((toolCallId: string) => selectToolCall(toolCallId), [selectToolCall]);
 
   return (
     <AnimatePresence key={message.id}>
@@ -182,7 +177,7 @@ function PreviewMessageInner({
                       onClick={() => handleSelect(toolCallId)}
                       className={cn(
                         "flex flex-col gap-2 p-2 mb-3 text-sm bg-zinc-50 dark:bg-zinc-900 rounded-md border border-zinc-200 dark:border-zinc-800 cursor-pointer hover:border-zinc-400 transition-colors",
-                        selectedEventId === toolCallId && "ring-1 ring-zinc-500"
+                        selectedToolCallId === toolCallId && "ring-1 ring-zinc-500"
                       )}
                     >
                       <div className="flex items-center gap-2">
@@ -245,7 +240,7 @@ function PreviewMessageInner({
                       onClick={() => handleSelect(toolCallId)}
                       className={cn(
                         "flex items-center gap-2 p-2 mb-3 text-sm bg-zinc-50 dark:bg-zinc-900 rounded-md border border-zinc-200 dark:border-zinc-800 cursor-pointer hover:border-zinc-400 transition-colors",
-                        selectedEventId === toolCallId && "ring-1 ring-zinc-500"
+                        selectedToolCallId === toolCallId && "ring-1 ring-zinc-500"
                       )}
                     >
                       <div className="flex items-center justify-center w-8 h-8 bg-zinc-100 dark:bg-zinc-800 rounded-full shrink-0">

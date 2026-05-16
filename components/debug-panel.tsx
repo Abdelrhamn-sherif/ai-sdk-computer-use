@@ -138,7 +138,7 @@ const EventItem = memo(function EventItem({
 
 export const DebugPanel = memo(function DebugPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
-  const { events, selectedEventId, selectEvent, clearEvents, eventCounts, agentStatus } =
+  const { events, selectedToolCallId, selectToolCall, clearEvents, eventCounts, agentStatus } =
     useEventContext();
 
   const totalEvents = events.length;
@@ -151,9 +151,9 @@ export const DebugPanel = memo(function DebugPanel() {
     clearEvents();
   }, [clearEvents]);
 
-  const handleEventSelect = useCallback((eventId: string) => {
-    selectEvent(eventId === selectedEventId ? null : eventId);
-  }, [selectEvent, selectedEventId]);
+  const handleEventSelect = useCallback((toolCallId: string) => {
+    selectToolCall(toolCallId === selectedToolCallId ? null : toolCallId);
+  }, [selectToolCall, selectedToolCallId]);
 
   return (
     <div className="border-t border-zinc-200 bg-zinc-50">
@@ -213,8 +213,8 @@ export const DebugPanel = memo(function DebugPanel() {
                 <EventItem
                   key={event.id}
                   event={event}
-                  isSelected={event.id === selectedEventId}
-                  onSelect={() => handleEventSelect(event.id)}
+                  isSelected={event.toolCallId === selectedToolCallId}
+                  onSelect={() => handleEventSelect(event.toolCallId)}
                 />
               ))
             )}

@@ -57,7 +57,9 @@ export function useChatSession({
     if (activeSessionId && activeSessionId !== currentSessionRef.current) {
       isSessionSwitchingRef.current = true;
       currentSessionRef.current = activeSessionId;
-      setMessages(activeSession?.messages ?? []);
+      
+      const messagesToSet = activeSession?.messages ?? [];
+      setMessages(messagesToSet);
       setChatKey((prev) => prev + 1);
       
       requestAnimationFrame(() => {

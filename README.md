@@ -45,7 +45,7 @@ The application uses strict TypeScript discriminated unions to normalize dispara
 ### 1. Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/Abdelrhamn-sherif/ai-sdk-computer-use.git
 cd ai-sdk-computer-use
 
 ```

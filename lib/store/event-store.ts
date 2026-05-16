@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type {
   ToolCallEvent,
   EventCounts,
@@ -24,16 +24,25 @@ export function useEventStore() {
   const [state, setState] = useState<EventStoreState>({
     eventsBySession: {},
     activeSessionId: null,
-    selectedEventId: null,
+    selectedToolCallId: null,
   });
 
   const [isHydrated, setIsHydrated] = useState(false);
+  const processedToolCallsRef = useRef<Set<string>>(new Set());
+  const lastSessionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const stored = loadEventsFromStorage();
     setState(stored);
     setIsHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (state.activeSessionId !== lastSessionIdRef.current) {
+      processedToolCallsRef.current.clear();
+      lastSessionIdRef.current = state.activeSessionId;
+    }
+  }, [state.activeSessionId]);
 
   useEffect(() => {
     if (isHydrated) {
@@ -45,7 +54,7 @@ export function useEventStore() {
     setState((prev) => ({
       ...prev,
       activeSessionId: sessionId,
-      selectedEventId: null,
+      selectedToolCallId: null,
     }));
   }, []);
 
@@ -94,11 +103,12 @@ export function useEventStore() {
     });
   }, []);
 
-  const selectEvent = useCallback((id: string | null): void => {
-    setState((prev) => ({ ...prev, selectedEventId: id }));
+  const selectToolCall = useCallback((toolCallId: string | null): void => {
+    setState((prev) => ({ ...prev, selectedToolCallId: toolCallId }));
   }, []);
 
   const clearEvents = useCallback((): void => {
+    processedToolCallsRef.current.clear();
     setState((prev) => {
       const sessionId = prev.activeSessionId;
       if (!sessionId) return prev;
@@ -109,7 +119,7 @@ export function useEventStore() {
           ...prev.eventsBySession,
           [sessionId]: [],
         },
-        selectedEventId: null,
+        selectedToolCallId: null,
       };
     });
   }, []);
@@ -125,6 +135,75 @@ export function useEventStore() {
     });
   }, []);
 
+  const upsertEvent = useCallback(
+    (event: Omit<ToolCallEvent, "id" | "timestamp">): string => {
+      const key = event.toolCallId;
+      const isProcessed = processedToolCallsRef.current.has(key);
+      
+      if (!isProcessed) {
+        processedToolCallsRef.current.add(key);
+      }
+      
+      let eventId = "";
+      
+      setState((prev) => {
+        const sessionId = prev.activeSessionId;
+        if (!sessionId) return prev;
+        
+        const currentEvents = prev.eventsBySession[sessionId] || [];
+        const existingIndex = currentEvents.findIndex((e) => e.toolCallId === event.toolCallId);
+        
+        if (existingIndex !== -1) {
+          const existingEvent = currentEvents[existingIndex];
+          eventId = existingEvent.id;
+          
+          const updates: Partial<ToolCallEvent> = {
+            status: event.status,
+          };
+          
+          if (event.completedAt !== null && event.completedAt !== undefined) {
+            updates.completedAt = event.completedAt;
+          }
+          
+          if (event.result !== undefined) {
+            updates.result = event.result;
+          }
+          
+          const updatedEvents = [...currentEvents];
+          updatedEvents[existingIndex] = { ...existingEvent, ...updates } as ToolCallEvent;
+          
+          return {
+            ...prev,
+            eventsBySession: {
+              ...prev.eventsBySession,
+              [sessionId]: updatedEvents,
+            },
+          };
+        }
+        
+        if (isProcessed) {
+          return prev;
+        }
+        
+        const id = generateEventId();
+        eventId = id;
+        const timestamp = Date.now();
+        const newEvent = { ...event, id, timestamp } as ToolCallEvent;
+        
+        return {
+          ...prev,
+          eventsBySession: {
+            ...prev.eventsBySession,
+            [sessionId]: [...currentEvents, newEvent],
+          },
+        };
+      });
+      
+      return eventId;
+    },
+    []
+  );
+
   const derived = useMemo<EventStoreDerived>(() => {
     const sessionId = state.activeSessionId;
     const events: ToolCallEvent[] = sessionId
@@ -138,24 +217,24 @@ export function useEventStore() {
       return events.find((e) => e.id === id);
     };
 
-    const getSelectedEvent = (): ToolCallEvent | null => {
-      if (!state.selectedEventId) return null;
-      return events.find((e) => e.id === state.selectedEventId) || null;
-    };
+    const selectedEvent: ToolCallEvent | null = state.selectedToolCallId
+      ? events.find((e) => e.toolCallId === state.selectedToolCallId) || null
+      : null;
 
-    return { events, eventCounts, agentStatus, getEventById, getSelectedEvent };
-  }, [state.eventsBySession, state.activeSessionId, state.selectedEventId]);
+    return { events, eventCounts, agentStatus, getEventById, selectedEvent };
+  }, [state.eventsBySession, state.activeSessionId, state.selectedToolCallId]);
 
   const actions: EventStoreActions = useMemo(
     () => ({
       setActiveSession,
       addEvent,
       updateEvent,
-      selectEvent,
+      upsertEvent,
+      selectToolCall,
       clearEvents,
       clearAllSessionEvents,
     }),
-    [setActiveSession, addEvent, updateEvent, selectEvent, clearEvents, clearAllSessionEvents]
+    [setActiveSession, addEvent, updateEvent, upsertEvent, selectToolCall, clearEvents, clearAllSessionEvents]
   );
 
   return {

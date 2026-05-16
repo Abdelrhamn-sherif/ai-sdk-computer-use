@@ -81,14 +81,15 @@ export interface SessionEvents {
 export interface EventStoreState {
   eventsBySession: SessionEvents;
   activeSessionId: string | null;
-  selectedEventId: string | null;
+  selectedToolCallId: string | null;
 }
 
 export interface EventStoreActions {
   setActiveSession: (sessionId: string | null) => void;
   addEvent: (event: Omit<ToolCallEvent, "id" | "timestamp">) => string;
   updateEvent: (id: string, updates: Partial<ToolCallEvent>) => void;
-  selectEvent: (id: string | null) => void;
+  upsertEvent: (event: Omit<ToolCallEvent, "id" | "timestamp">) => string;
+  selectToolCall: (toolCallId: string | null) => void;
   clearEvents: () => void;
   clearAllSessionEvents: (sessionId: string) => void;
 }
@@ -98,7 +99,7 @@ export interface EventStoreDerived {
   eventCounts: EventCounts;
   agentStatus: AgentStatus;
   getEventById: (id: string) => ToolCallEvent | undefined;
-  getSelectedEvent: () => ToolCallEvent | null;
+  selectedEvent: ToolCallEvent | null;
 }
 
 export type EventStore = EventStoreState & EventStoreActions & EventStoreDerived;
@@ -107,24 +108,24 @@ const STORAGE_KEY = "ai-sdk-computer-use-events";
 
 export function loadEventsFromStorage(): EventStoreState {
   if (typeof window === "undefined") {
-    return { eventsBySession: {}, activeSessionId: null, selectedEventId: null };
+    return { eventsBySession: {}, activeSessionId: null, selectedToolCallId: null };
   }
 
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      const parsed = JSON.parse(stored) as EventStoreState;
+      const parsed = JSON.parse(stored);
       return {
         eventsBySession: parsed.eventsBySession || {},
         activeSessionId: parsed.activeSessionId,
-        selectedEventId: null,
+        selectedToolCallId: null,
       };
     }
   } catch (error) {
     console.error("Failed to load events from localStorage:", error);
   }
 
-  return { eventsBySession: {}, activeSessionId: null, selectedEventId: null };
+  return { eventsBySession: {}, activeSessionId: null, selectedToolCallId: null };
 }
 
 export function saveEventsToStorage(state: EventStoreState): void {
