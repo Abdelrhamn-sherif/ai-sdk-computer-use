@@ -1,10 +1,4 @@
 
----
-
-### 🚀 The Upgraded README (Drop-in Ready)
-
-Here is a revised version that keeps your clean formatting but elevates the technical language to match a high-scoring senior submission:
-
 ```markdown
 # AI SDK Computer Use Workspace
 
