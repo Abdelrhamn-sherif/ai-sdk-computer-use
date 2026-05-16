@@ -24,33 +24,32 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const store = useSessionStore();
 
-  const value = useMemo(
+  // True write-only actions — stable useCallback refs that never change reference,
+  // so consuming components won't re-render just because unrelated state changed.
+  const actions = useMemo(
     () => ({
-      sessions: store.sessions,
-      activeSessionId: store.activeSessionId,
-      activeSession: store.activeSession ?? null,
-      isHydrated: store.isHydrated,
       createSession: store.createSession,
       switchSession: store.switchSession,
       deleteSession: store.deleteSession,
       updateSessionMessages: store.updateSessionMessages,
       updateSessionTitle: store.updateSessionTitle,
       updateSessionSandboxId: store.updateSessionSandboxId,
-      getActiveSession: store.getActiveSession,
     }),
-    [
-      store.sessions,
-      store.activeSessionId,
-      store.activeSession,
-      store.isHydrated,
-      store.createSession,
-      store.switchSession,
-      store.deleteSession,
-      store.updateSessionMessages,
-      store.updateSessionTitle,
-      store.updateSessionSandboxId,
-      store.getActiveSession,
-    ]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [] // All of the above are stable useCallback refs from the store
+  );
+
+  const value = useMemo<SessionContextValue>(
+    () => ({
+      sessions: store.sessions,
+      activeSessionId: store.activeSessionId,
+      activeSession: store.activeSession ?? null,
+      isHydrated: store.isHydrated,
+      // getActiveSession closes over state — must stay in the state memo
+      getActiveSession: store.getActiveSession,
+      ...actions,
+    }),
+    [store.sessions, store.activeSessionId, store.activeSession, store.isHydrated, store.getActiveSession, actions]
   );
 
   return (

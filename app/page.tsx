@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { EventProvider, SessionProvider, useEventContext, useSessionContext } from "@/lib/store";
+import { EventProvider, SessionProvider, useSessionContext, MobileUIProvider, useMobileUI } from "@/lib/store";
 import { useSandbox, useChatSession } from "@/lib/hooks";
 import { useScrollToBottom } from "@/lib/use-scroll-to-bottom";
 import { ChatPanel, RightPanel, MobileSidebar, MobileVNCModal } from "@/components/panels";
@@ -27,8 +27,7 @@ function LoadingSpinner() {
 
 function DashboardContent() {
   const [chatContainerRef, chatEndRef] = useScrollToBottom();
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [isMobileVNCOpen, setIsMobileVNCOpen] = useState(false);
+  const { isMobileSidebarOpen, isMobileVNCOpen, toggleMobileSidebar, setMobileVNCOpen } = useMobileUI();
   const [expandedScreenshot, setExpandedScreenshot] = useState<string | null>(null);
 
   const {
@@ -42,9 +41,7 @@ function DashboardContent() {
     updateSessionSandboxId,
   } = useSessionContext();
 
-  const { clearEvents, setActiveSession, isHydrated: isEventHydrated } = useEventContext();
-
-  const { isInitializing, streamUrl, refreshDesktop } = useSandbox({
+  const { isInitializing, streamUrl, sandboxId, refreshDesktop } = useSandbox({
     activeSessionId,
     updateSessionSandboxId,
   });
@@ -63,35 +60,27 @@ function DashboardContent() {
   } = useChatSession({
     activeSessionId,
     activeSession,
-    sandboxId: null,
+    sandboxId,
     createSession,
     updateSessionMessages,
-    setActiveSession,
   });
 
   const handleCreateSession = useCallback(() => {
-    clearEvents();
+    // Bump chatKey BEFORE createSession so the OLD chat instance is torn down
+    // cleanly before the session id flips and the new instance mounts with
+    // its (empty) initialMessages.
+    resetMessages();
     createSession();
-    resetMessages([]);
-  }, [clearEvents, createSession, resetMessages]);
+  }, [createSession, resetMessages]);
 
   const handleSwitchSession = useCallback(
     (id: string) => {
       if (id === activeSessionId) return;
-      
-      setActiveSession(id);
+      resetMessages();
       switchSession(id);
-      const session = sessions.find((s) => s.id === id);
-      resetMessages(session?.messages ?? []);
     },
-    [setActiveSession, switchSession, sessions, activeSessionId, resetMessages]
+    [switchSession, activeSessionId, resetMessages]
   );
-
-  useEffect(() => {
-    if (isHydrated && isEventHydrated && activeSessionId) {
-      setActiveSession(activeSessionId);
-    }
-  }, [isHydrated, isEventHydrated, activeSessionId, setActiveSession]);
 
   if (!isHydrated) {
     return <LoadingSpinner />;
@@ -118,8 +107,8 @@ function DashboardContent() {
               isMobileSidebarOpen={isMobileSidebarOpen}
               onCreateSession={handleCreateSession}
               onSwitchSession={handleSwitchSession}
-              onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
-              onOpenMobileVNC={() => setIsMobileVNCOpen(true)}
+              onToggleMobileSidebar={toggleMobileSidebar}
+              onOpenMobileVNC={() => setMobileVNCOpen(true)}
               handleInputChange={handleInputChange}
               handleSubmit={handleSubmit}
               stop={stop}
@@ -155,8 +144,8 @@ function DashboardContent() {
           isMobileSidebarOpen={isMobileSidebarOpen}
           onCreateSession={handleCreateSession}
           onSwitchSession={handleSwitchSession}
-          onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
-          onOpenMobileVNC={() => setIsMobileVNCOpen(true)}
+          onToggleMobileSidebar={toggleMobileSidebar}
+          onOpenMobileVNC={() => setMobileVNCOpen(true)}
           handleInputChange={handleInputChange}
           handleSubmit={handleSubmit}
           stop={stop}
@@ -169,7 +158,7 @@ function DashboardContent() {
         isOpen={isMobileSidebarOpen}
         sessions={sessions}
         activeSessionId={activeSessionId}
-        onClose={() => setIsMobileSidebarOpen(false)}
+        onClose={toggleMobileSidebar}
         onCreateSession={handleCreateSession}
         onSwitchSession={handleSwitchSession}
       />
@@ -178,7 +167,7 @@ function DashboardContent() {
         isOpen={isMobileVNCOpen}
         streamUrl={streamUrl}
         isInitializing={isInitializing}
-        onClose={() => setIsMobileVNCOpen(false)}
+        onClose={() => setMobileVNCOpen(false)}
         onRefresh={refreshDesktop}
       />
     </div>
@@ -189,7 +178,9 @@ export default function Chat() {
   return (
     <SessionProvider>
       <EventProvider>
-        <DashboardContent />
+        <MobileUIProvider>
+          <DashboardContent />
+        </MobileUIProvider>
       </EventProvider>
     </SessionProvider>
   );

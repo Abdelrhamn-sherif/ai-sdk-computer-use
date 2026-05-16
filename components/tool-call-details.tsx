@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback } from "react";
-import { useEventContext } from "@/lib/store";
+import { useSelectedEvent, useSelectToolCall, useEventCounts } from "@/lib/store";
 import type { ComputerToolCallEvent, BashToolCallEvent } from "@/lib/store";
 import { isComputerToolCallEvent, isBashToolCallEvent } from "@/lib/store";
 import {
@@ -178,7 +178,9 @@ const ToolCallDisplay = memo(function ToolCallDisplay({ event, onClose }: ToolCa
 });
 
 export const ToolCallDetailsPanel = memo(function ToolCallDetailsPanel() {
-  const { selectedEvent, selectToolCall, eventCounts } = useEventContext();
+  const selectedEvent = useSelectedEvent();
+  const selectToolCall = useSelectToolCall();
+  const eventCounts = useEventCounts();
 
   const handleClose = useCallback(() => selectToolCall(null), [selectToolCall]);
 

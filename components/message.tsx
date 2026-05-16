@@ -7,7 +7,12 @@ import equal from "fast-deep-equal";
 import { Streamdown } from "streamdown";
 
 import { ABORTED, cn } from "@/lib/utils";
-import { useEventContext } from "@/lib/store";
+import {
+  useEventActions,
+  useSelectToolCall,
+  useSelectedToolCallId,
+  useSessionContext,
+} from "@/lib/store";
 import type { ComputerAction, ComputerToolCallEvent, BashToolCallEvent } from "@/lib/store";
 import {
   Camera,
@@ -82,20 +87,25 @@ function PreviewMessageInner({
   status,
   onScreenshotClick,
 }: PreviewMessageProps) {
-  const { upsertEvent, selectToolCall, selectedToolCallId } = useEventContext();
+  const { upsertEvent } = useEventActions();
+  const selectToolCall = useSelectToolCall();
+  const selectedToolCallId = useSelectedToolCallId();
+  const { activeSessionId } = useSessionContext();
 
   useEffect(() => {
+    if (!activeSessionId) return;
+
     message.parts?.forEach((part) => {
       if (part.type !== "tool-invocation") return;
-      
+
       const { toolName, toolCallId, state, args } = part.toolInvocation;
       if (toolName !== "computer" && toolName !== "bash") return;
-      
+
       const result = state === "result" ? part.toolInvocation.result : undefined;
       const now = Date.now();
 
       if (toolName === "computer") {
-        upsertEvent({
+        upsertEvent(activeSessionId, {
           type: "computer_tool",
           toolCallId,
           action: args.action as ComputerAction,
@@ -113,7 +123,7 @@ function PreviewMessageInner({
           result: result as ComputerToolCallEvent["result"],
         } as Omit<ComputerToolCallEvent, "id" | "timestamp">);
       } else {
-        upsertEvent({
+        upsertEvent(activeSessionId, {
           type: "bash_tool",
           toolCallId,
           status: state === "call" ? "running" : "completed",
@@ -125,7 +135,7 @@ function PreviewMessageInner({
         } as Omit<BashToolCallEvent, "id" | "timestamp">);
       }
     });
-  }, [message.parts, message.id, upsertEvent]);
+  }, [message.parts, message.id, upsertEvent, activeSessionId]);
 
   const handleSelect = useCallback((toolCallId: string) => selectToolCall(toolCallId), [selectToolCall]);
 

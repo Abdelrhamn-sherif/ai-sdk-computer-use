@@ -80,35 +80,26 @@ export interface SessionEvents {
 
 export interface EventStoreState {
   eventsBySession: SessionEvents;
-  activeSessionId: string | null;
   selectedToolCallId: string | null;
 }
 
 export interface EventStoreActions {
-  setActiveSession: (sessionId: string | null) => void;
-  addEvent: (event: Omit<ToolCallEvent, "id" | "timestamp">) => string;
-  updateEvent: (id: string, updates: Partial<ToolCallEvent>) => void;
-  upsertEvent: (event: Omit<ToolCallEvent, "id" | "timestamp">) => string;
+  upsertEvent: (
+    sessionId: string,
+    event: Omit<ToolCallEvent, "id" | "timestamp">
+  ) => string;
   selectToolCall: (toolCallId: string | null) => void;
-  clearEvents: () => void;
-  clearAllSessionEvents: (sessionId: string) => void;
+  clearSessionEvents: (sessionId: string) => void;
+  deleteSessionEvents: (sessionId: string) => void;
 }
 
-export interface EventStoreDerived {
-  events: ToolCallEvent[];
-  eventCounts: EventCounts;
-  agentStatus: AgentStatus;
-  getEventById: (id: string) => ToolCallEvent | undefined;
-  selectedEvent: ToolCallEvent | null;
-}
-
-export type EventStore = EventStoreState & EventStoreActions & EventStoreDerived;
+export type EventStore = EventStoreState & EventStoreActions;
 
 const STORAGE_KEY = "ai-sdk-computer-use-events";
 
 export function loadEventsFromStorage(): EventStoreState {
   if (typeof window === "undefined") {
-    return { eventsBySession: {}, activeSessionId: null, selectedToolCallId: null };
+    return { eventsBySession: {}, selectedToolCallId: null };
   }
 
   try {
@@ -117,7 +108,6 @@ export function loadEventsFromStorage(): EventStoreState {
       const parsed = JSON.parse(stored);
       return {
         eventsBySession: parsed.eventsBySession || {},
-        activeSessionId: parsed.activeSessionId,
         selectedToolCallId: null,
       };
     }
@@ -125,14 +115,17 @@ export function loadEventsFromStorage(): EventStoreState {
     console.error("Failed to load events from localStorage:", error);
   }
 
-  return { eventsBySession: {}, activeSessionId: null, selectedToolCallId: null };
+  return { eventsBySession: {}, selectedToolCallId: null };
 }
 
 export function saveEventsToStorage(state: EventStoreState): void {
   if (typeof window === "undefined") return;
 
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ eventsBySession: state.eventsBySession })
+    );
   } catch (error) {
     console.error("Failed to save events to localStorage:", error);
   }

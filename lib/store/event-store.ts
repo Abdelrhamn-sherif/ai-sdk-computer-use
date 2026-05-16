@@ -1,13 +1,9 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type {
   ToolCallEvent,
-  EventCounts,
-  AgentStatus,
   EventStoreState,
-  EventStoreActions,
-  EventStoreDerived,
   ComputerToolCallEvent,
   BashToolCallEvent,
   ComputerAction,
@@ -16,20 +12,23 @@ import {
   loadEventsFromStorage,
   saveEventsToStorage,
   generateEventId,
-  calculateEventCounts,
-  calculateAgentStatus,
 } from "./event-types";
 
+/**
+ * Single source of truth for tool-call events. The store does NOT know which
+ * session is active — it just maps sessionId -> events. The "active session"
+ * is owned by the session store, and selectors combine the two.
+ *
+ * This eliminates the entire class of race conditions that come from keeping
+ * two stores in sync.
+ */
 export function useEventStore() {
   const [state, setState] = useState<EventStoreState>({
     eventsBySession: {},
-    activeSessionId: null,
     selectedToolCallId: null,
   });
 
   const [isHydrated, setIsHydrated] = useState(false);
-  const processedToolCallsRef = useRef<Set<string>>(new Set());
-  const lastSessionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const stored = loadEventsFromStorage();
@@ -38,158 +37,63 @@ export function useEventStore() {
   }, []);
 
   useEffect(() => {
-    if (state.activeSessionId !== lastSessionIdRef.current) {
-      processedToolCallsRef.current.clear();
-      lastSessionIdRef.current = state.activeSessionId;
-    }
-  }, [state.activeSessionId]);
-
-  useEffect(() => {
     if (isHydrated) {
       saveEventsToStorage(state);
     }
   }, [state, isHydrated]);
 
-  const setActiveSession = useCallback((sessionId: string | null): void => {
-    setState((prev) => ({
-      ...prev,
-      activeSessionId: sessionId,
-      selectedToolCallId: null,
-    }));
-  }, []);
-
-  const addEvent = useCallback(
-    (event: Omit<ToolCallEvent, "id" | "timestamp">): string => {
-      const id = generateEventId();
-      const timestamp = Date.now();
-      const newEvent = { ...event, id, timestamp } as ToolCallEvent;
-
-      setState((prev) => {
-        const sessionId = prev.activeSessionId;
-        if (!sessionId) return prev;
-
-        const currentEvents = prev.eventsBySession[sessionId] || [];
-        return {
-          ...prev,
-          eventsBySession: {
-            ...prev.eventsBySession,
-            [sessionId]: [...currentEvents, newEvent],
-          },
-        };
-      });
-
-      return id;
-    },
-    []
-  );
-
-  const updateEvent = useCallback((id: string, updates: Partial<ToolCallEvent>): void => {
-    setState((prev) => {
-      const sessionId = prev.activeSessionId;
-      if (!sessionId) return prev;
-
-      const sessionEvents = prev.eventsBySession[sessionId];
-      if (!sessionEvents) return prev;
-
-      return {
-        ...prev,
-        eventsBySession: {
-          ...prev.eventsBySession,
-          [sessionId]: sessionEvents.map((event) =>
-            event.id === id ? ({ ...event, ...updates } as ToolCallEvent) : event
-          ),
-        },
-      };
-    });
-  }, []);
-
-  const selectToolCall = useCallback((toolCallId: string | null): void => {
-    setState((prev) => ({ ...prev, selectedToolCallId: toolCallId }));
-  }, []);
-
-  const clearEvents = useCallback((): void => {
-    processedToolCallsRef.current.clear();
-    setState((prev) => {
-      const sessionId = prev.activeSessionId;
-      if (!sessionId) return prev;
-
-      return {
-        ...prev,
-        eventsBySession: {
-          ...prev.eventsBySession,
-          [sessionId]: [],
-        },
-        selectedToolCallId: null,
-      };
-    });
-  }, []);
-
-  const clearAllSessionEvents = useCallback((sessionId: string): void => {
-    setState((prev) => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [sessionId]: _, ...remaining } = prev.eventsBySession;
-      return {
-        ...prev,
-        eventsBySession: remaining,
-      };
-    });
-  }, []);
-
   const upsertEvent = useCallback(
-    (event: Omit<ToolCallEvent, "id" | "timestamp">): string => {
-      const key = event.toolCallId;
-      const isProcessed = processedToolCallsRef.current.has(key);
-      
-      if (!isProcessed) {
-        processedToolCallsRef.current.add(key);
-      }
-      
+    (
+      sessionId: string,
+      event: Omit<ToolCallEvent, "id" | "timestamp">
+    ): string => {
+      if (!sessionId) return "";
+
       let eventId = "";
-      
+
       setState((prev) => {
-        const sessionId = prev.activeSessionId;
-        if (!sessionId) return prev;
-        
         const currentEvents = prev.eventsBySession[sessionId] || [];
-        const existingIndex = currentEvents.findIndex((e) => e.toolCallId === event.toolCallId);
-        
+        const existingIndex = currentEvents.findIndex(
+          (e) => e.toolCallId === event.toolCallId
+        );
+
         if (existingIndex !== -1) {
-          const existingEvent = currentEvents[existingIndex];
-          eventId = existingEvent.id;
-          
-          const updates: Partial<ToolCallEvent> = {
+          const existing = currentEvents[existingIndex];
+          eventId = existing.id;
+
+          // Skip if nothing meaningful changed — keeps the store reference
+          // stable and avoids re-renders / re-persistence on every stream chunk.
+          const nextCompletedAt =
+            event.completedAt != null ? event.completedAt : existing.completedAt;
+          const nextResult =
+            event.result !== undefined ? event.result : existing.result;
+
+          if (
+            existing.status === event.status &&
+            existing.completedAt === nextCompletedAt &&
+            existing.result === nextResult
+          ) {
+            return prev;
+          }
+
+          const updated = [...currentEvents];
+          updated[existingIndex] = {
+            ...existing,
             status: event.status,
-          };
-          
-          if (event.completedAt !== null && event.completedAt !== undefined) {
-            updates.completedAt = event.completedAt;
-          }
-          
-          if (event.result !== undefined) {
-            updates.result = event.result;
-          }
-          
-          const updatedEvents = [...currentEvents];
-          updatedEvents[existingIndex] = { ...existingEvent, ...updates } as ToolCallEvent;
-          
+            completedAt: nextCompletedAt,
+            result: nextResult,
+          } as ToolCallEvent;
+
           return {
             ...prev,
-            eventsBySession: {
-              ...prev.eventsBySession,
-              [sessionId]: updatedEvents,
-            },
+            eventsBySession: { ...prev.eventsBySession, [sessionId]: updated },
           };
         }
-        
-        if (isProcessed) {
-          return prev;
-        }
-        
+
         const id = generateEventId();
         eventId = id;
-        const timestamp = Date.now();
-        const newEvent = { ...event, id, timestamp } as ToolCallEvent;
-        
+        const newEvent = { ...event, id, timestamp: Date.now() } as ToolCallEvent;
+
         return {
           ...prev,
           eventsBySession: {
@@ -198,50 +102,48 @@ export function useEventStore() {
           },
         };
       });
-      
+
       return eventId;
     },
     []
   );
 
-  const derived = useMemo<EventStoreDerived>(() => {
-    const sessionId = state.activeSessionId;
-    const events: ToolCallEvent[] = sessionId
-      ? (state.eventsBySession[sessionId] || [])
-      : [];
+  const selectToolCall = useCallback((toolCallId: string | null): void => {
+    setState((prev) =>
+      prev.selectedToolCallId === toolCallId
+        ? prev
+        : { ...prev, selectedToolCallId: toolCallId }
+    );
+  }, []);
 
-    const eventCounts: EventCounts = calculateEventCounts(events);
-    const agentStatus: AgentStatus = calculateAgentStatus(events);
+  const clearSessionEvents = useCallback((sessionId: string): void => {
+    setState((prev) => {
+      if (!prev.eventsBySession[sessionId]) return prev;
+      return {
+        ...prev,
+        eventsBySession: { ...prev.eventsBySession, [sessionId]: [] },
+        selectedToolCallId: null,
+      };
+    });
+  }, []);
 
-    const getEventById = (id: string): ToolCallEvent | undefined => {
-      return events.find((e) => e.id === id);
-    };
-
-    const selectedEvent: ToolCallEvent | null = state.selectedToolCallId
-      ? events.find((e) => e.toolCallId === state.selectedToolCallId) || null
-      : null;
-
-    return { events, eventCounts, agentStatus, getEventById, selectedEvent };
-  }, [state.eventsBySession, state.activeSessionId, state.selectedToolCallId]);
-
-  const actions: EventStoreActions = useMemo(
-    () => ({
-      setActiveSession,
-      addEvent,
-      updateEvent,
-      upsertEvent,
-      selectToolCall,
-      clearEvents,
-      clearAllSessionEvents,
-    }),
-    [setActiveSession, addEvent, updateEvent, upsertEvent, selectToolCall, clearEvents, clearAllSessionEvents]
-  );
+  const deleteSessionEvents = useCallback((sessionId: string): void => {
+    setState((prev) => {
+      if (!(sessionId in prev.eventsBySession)) return prev;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [sessionId]: _, ...remaining } = prev.eventsBySession;
+      return { ...prev, eventsBySession: remaining };
+    });
+  }, []);
 
   return {
-    ...state,
-    ...actions,
-    ...derived,
+    eventsBySession: state.eventsBySession,
+    selectedToolCallId: state.selectedToolCallId,
     isHydrated,
+    upsertEvent,
+    selectToolCall,
+    clearSessionEvents,
+    deleteSessionEvents,
   };
 }
 
@@ -251,7 +153,10 @@ export function mapToolInvocationToEvent(
   invocationState: "call" | "result",
   args: Record<string, unknown>,
   result?: unknown
-): Omit<ComputerToolCallEvent, "id" | "timestamp"> | Omit<BashToolCallEvent, "id" | "timestamp"> | null {
+):
+  | Omit<ComputerToolCallEvent, "id" | "timestamp">
+  | Omit<BashToolCallEvent, "id" | "timestamp">
+  | null {
   if (toolName === "computer") {
     const action = args.action as ComputerAction;
     const payload: ComputerToolCallEvent["payload"] = {
@@ -265,7 +170,7 @@ export function mapToolInvocationToEvent(
     const status = invocationState === "call" ? "running" : "completed";
     const now = Date.now();
 
-    const computerEvent: Omit<ComputerToolCallEvent, "id" | "timestamp"> = {
+    return {
       type: "computer_tool",
       toolCallId,
       action,
@@ -279,7 +184,6 @@ export function mapToolInvocationToEvent(
           ? (result as ComputerToolCallEvent["result"])
           : undefined,
     };
-    return computerEvent;
   }
 
   if (toolName === "bash") {
@@ -290,7 +194,7 @@ export function mapToolInvocationToEvent(
     const status = invocationState === "call" ? "running" : "completed";
     const now = Date.now();
 
-    const bashEvent: Omit<BashToolCallEvent, "id" | "timestamp"> = {
+    return {
       type: "bash_tool",
       toolCallId,
       status,
@@ -303,7 +207,6 @@ export function mapToolInvocationToEvent(
           ? (result as BashToolCallEvent["result"])
           : undefined,
     };
-    return bashEvent;
   }
 
   return null;

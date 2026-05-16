@@ -18,7 +18,8 @@ export async function POST(req: Request) {
         "Use the computer tool to help the user with their requests. " +
         "Use the bash tool to execute commands on the computer. You can create files and folders using the bash tool. Always prefer the bash tool where it is viable for the task. " +
         "Be sure to advise the user when waiting is necessary. " +
-        "If the browser opens with a setup wizard, YOU MUST IGNORE IT and move straight to the next step (e.g. input the url in the search bar).",
+        "If the browser opens with a setup wizard, YOU MUST IGNORE IT and move straight to the next step (e.g. input the url in the search bar). " +
+        "On this Linux desktop, double_click is required to open desktop icons, URL shortcuts, files, and folders — a single left_click only selects them. Use double_click whenever you need to OPEN something from the desktop or a file manager. Inside an already-open browser, use single left_click for links and buttons as usual.",
       messages: prunedMessages(messages),
       tools: { computer: computerTool(sandboxId), bash: bashTool(sandboxId) },
       providerOptions: {

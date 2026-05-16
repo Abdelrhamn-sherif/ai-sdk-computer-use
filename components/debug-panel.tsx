@@ -1,7 +1,15 @@
 "use client";
 
 import { memo, useState, useCallback } from "react";
-import { useEventContext } from "@/lib/store";
+import {
+  useEvents,
+  useSelectedToolCallId,
+  useSelectToolCall,
+  useEventCounts,
+  useAgentStatus,
+  useEventActions,
+  useSessionContext,
+} from "@/lib/store";
 import type { ToolCallEvent, ComputerToolCallEvent, BashToolCallEvent } from "@/lib/store";
 import { isComputerToolCallEvent, isBashToolCallEvent } from "@/lib/store";
 import {
@@ -138,8 +146,13 @@ const EventItem = memo(function EventItem({
 
 export const DebugPanel = memo(function DebugPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
-  const { events, selectedToolCallId, selectToolCall, clearEvents, eventCounts, agentStatus } =
-    useEventContext();
+  const events = useEvents();
+  const selectedToolCallId = useSelectedToolCallId();
+  const selectToolCall = useSelectToolCall();
+  const { clearSessionEvents } = useEventActions();
+  const { activeSessionId } = useSessionContext();
+  const eventCounts = useEventCounts();
+  const agentStatus = useAgentStatus();
 
   const totalEvents = events.length;
 
@@ -148,8 +161,8 @@ export const DebugPanel = memo(function DebugPanel() {
   }, []);
 
   const handleClearEvents = useCallback(() => {
-    clearEvents();
-  }, [clearEvents]);
+    if (activeSessionId) clearSessionEvents(activeSessionId);
+  }, [clearSessionEvents, activeSessionId]);
 
   const handleEventSelect = useCallback((toolCallId: string) => {
     selectToolCall(toolCallId === selectedToolCallId ? null : toolCallId);

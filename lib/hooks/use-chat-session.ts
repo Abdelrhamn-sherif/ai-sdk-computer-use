@@ -12,7 +12,6 @@ interface UseChatSessionOptions {
   sandboxId: string | null;
   createSession: () => string;
   updateSessionMessages: (id: string, messages: Message[]) => void;
-  setActiveSession: (id: string | null) => void;
 }
 
 export function useChatSession({
@@ -21,11 +20,10 @@ export function useChatSession({
   sandboxId,
   createSession,
   updateSessionMessages,
-  setActiveSession,
 }: UseChatSessionOptions) {
   const [chatKey, setChatKey] = useState(0);
   const currentSessionRef = useRef<string | null>(activeSessionId);
-  const isSessionSwitchingRef = useRef(false);
+  const isSwitchingRef = useRef(false);
 
   const {
     messages,
@@ -36,7 +34,6 @@ export function useChatSession({
     stop: stopGeneration,
     append,
     setMessages,
-    reload,
   } = useChat({
     api: "/api/chat",
     id: activeSessionId ?? undefined,
@@ -53,79 +50,57 @@ export function useChatSession({
     },
   });
 
+  // Track which session ref the persistence effect should accept writes for.
+  // resetMessages sets this to the OLD id so transient mid-switch renders
+  // don't get persisted. Once activeSessionId actually changes, sync it.
   useEffect(() => {
     if (activeSessionId && activeSessionId !== currentSessionRef.current) {
-      isSessionSwitchingRef.current = true;
       currentSessionRef.current = activeSessionId;
-      
-      const messagesToSet = activeSession?.messages ?? [];
-      setMessages(messagesToSet);
-      setChatKey((prev) => prev + 1);
-      
-      requestAnimationFrame(() => {
-        isSessionSwitchingRef.current = false;
-      });
     }
-  }, [activeSessionId, activeSession, setMessages]);
+  }, [activeSessionId]);
 
+  // Persist messages back to session store, but skip during a session switch
+  // to avoid writing mid-transition state back to the wrong session.
   useEffect(() => {
     if (
       activeSessionId &&
       messages.length > 0 &&
-      !isSessionSwitchingRef.current &&
+      !isSwitchingRef.current &&
       currentSessionRef.current === activeSessionId
     ) {
       updateSessionMessages(activeSessionId, messages);
     }
   }, [messages, activeSessionId, updateSessionMessages]);
 
-  useEffect(() => {
-    if (activeSessionId) {
-      setActiveSession(activeSessionId);
-    }
-  }, [activeSessionId, setActiveSession]);
-
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      
       if (!activeSessionId) {
-        const newSessionId = createSession();
-        currentSessionRef.current = newSessionId;
-        setActiveSession(newSessionId);
-        setChatKey((prev) => prev + 1);
+        createSession();
+        // Don't bump chatKey here — the session change will trigger the new
+        // useChat instance to pick up the new id on the next render.
       }
-      
       originalHandleSubmit(e);
     },
-    [activeSessionId, createSession, setActiveSession, originalHandleSubmit]
+    [activeSessionId, createSession, originalHandleSubmit]
   );
 
   const handleAppend = useCallback(
     (message: { role: "user"; content: string }) => {
-      let sessionId = activeSessionId;
-      
-      if (!sessionId) {
-        sessionId = createSession();
-        currentSessionRef.current = sessionId;
-        setActiveSession(sessionId);
-        setChatKey((prev) => prev + 1);
+      if (!activeSessionId) {
+        createSession();
       }
-      
       append(message);
     },
-    [activeSessionId, createSession, setActiveSession, append]
+    [activeSessionId, createSession, append]
   );
 
   const stop = useCallback(() => {
     stopGeneration();
 
     const lastMessage = messages.at(-1);
-    const lastMessageLastPart = lastMessage?.parts?.at(-1);
-    if (
-      lastMessage?.role === "assistant" &&
-      lastMessageLastPart?.type === "tool-invocation"
-    ) {
+    const lastPart = lastMessage?.parts?.at(-1);
+    if (lastMessage?.role === "assistant" && lastPart?.type === "tool-invocation") {
       setMessages((prev) => [
         ...prev.slice(0, -1),
         {
@@ -133,9 +108,9 @@ export function useChatSession({
           parts: [
             ...(lastMessage.parts?.slice(0, -1) || []),
             {
-              ...lastMessageLastPart,
+              ...lastPart,
               toolInvocation: {
-                ...lastMessageLastPart.toolInvocation,
+                ...lastPart.toolInvocation,
                 state: "result",
                 result: ABORTED,
               },
@@ -146,13 +121,18 @@ export function useChatSession({
     }
   }, [messages, setMessages, stopGeneration]);
 
-  const resetMessages = useCallback(
-    (newMessages: Message[] = []) => {
-      setMessages(newMessages);
-      setChatKey((prev) => prev + 1);
-    },
-    [setMessages]
-  );
+  // Called externally (handleSwitchSession / handleCreateSession) immediately
+  // before the active session changes. Bumps chatKey so ChatPanel + useChat
+  // fully remount under the new id, picking up initialMessages cleanly. The
+  // OLD-id ref guard prevents stale persistence during the transition.
+  const resetMessages = useCallback(() => {
+    isSwitchingRef.current = true;
+    currentSessionRef.current = activeSessionId;
+    setChatKey((k) => k + 1);
+    setTimeout(() => {
+      isSwitchingRef.current = false;
+    }, 0);
+  }, [activeSessionId]);
 
   return {
     messages,
@@ -166,6 +146,5 @@ export function useChatSession({
     setMessages,
     resetMessages,
     chatKey,
-    reload,
   };
 }

@@ -1,64 +1,48 @@
 "use client";
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
-import type { ToolCallEvent, EventCounts, AgentStatus } from "./event-types";
+import type { SessionEvents, ToolCallEvent } from "./event-types";
 import { useEventStore } from "./event-store";
 
-interface EventContextValue {
-  events: ToolCallEvent[];
+export interface EventContextValue {
+  eventsBySession: SessionEvents;
   selectedToolCallId: string | null;
-  selectedEvent: ToolCallEvent | null;
   isHydrated: boolean;
-  setActiveSession: (sessionId: string | null) => void;
-  addEvent: (event: Omit<ToolCallEvent, "id" | "timestamp">) => string;
-  updateEvent: (id: string, updates: Partial<ToolCallEvent>) => void;
-  upsertEvent: (event: Omit<ToolCallEvent, "id" | "timestamp">) => string;
+  upsertEvent: (
+    sessionId: string,
+    event: Omit<ToolCallEvent, "id" | "timestamp">
+  ) => string;
   selectToolCall: (toolCallId: string | null) => void;
-  clearEvents: () => void;
-  clearAllSessionEvents: (sessionId: string) => void;
-  eventCounts: EventCounts;
-  agentStatus: AgentStatus;
-  getEventById: (id: string) => ToolCallEvent | undefined;
+  clearSessionEvents: (sessionId: string) => void;
+  deleteSessionEvents: (sessionId: string) => void;
 }
 
-const EventContext = createContext<EventContextValue | null>(null);
+export const EventContext = createContext<EventContextValue | null>(null);
 
 export function EventProvider({ children }: { children: ReactNode }) {
   const store = useEventStore();
 
-  const value = useMemo(
+  // Actions are stable (created with useCallback in the store), so we memoize
+  // them separately so state changes don't cause action re-references.
+  const actions = useMemo(
     () => ({
-      events: store.events,
-      selectedToolCallId: store.selectedToolCallId,
-      selectedEvent: store.selectedEvent,
-      isHydrated: store.isHydrated,
-      setActiveSession: store.setActiveSession,
-      addEvent: store.addEvent,
-      updateEvent: store.updateEvent,
       upsertEvent: store.upsertEvent,
       selectToolCall: store.selectToolCall,
-      clearEvents: store.clearEvents,
-      clearAllSessionEvents: store.clearAllSessionEvents,
-      eventCounts: store.eventCounts,
-      agentStatus: store.agentStatus,
-      getEventById: store.getEventById,
+      clearSessionEvents: store.clearSessionEvents,
+      deleteSessionEvents: store.deleteSessionEvents,
     }),
-    [
-      store.events,
-      store.selectedToolCallId,
-      store.selectedEvent,
-      store.isHydrated,
-      store.setActiveSession,
-      store.addEvent,
-      store.updateEvent,
-      store.upsertEvent,
-      store.selectToolCall,
-      store.clearEvents,
-      store.clearAllSessionEvents,
-      store.eventCounts,
-      store.agentStatus,
-      store.getEventById,
-    ]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [] // All actions are stable useCallback refs — no deps needed
+  );
+
+  const value = useMemo<EventContextValue>(
+    () => ({
+      eventsBySession: store.eventsBySession,
+      selectedToolCallId: store.selectedToolCallId,
+      isHydrated: store.isHydrated,
+      ...actions,
+    }),
+    [store.eventsBySession, store.selectedToolCallId, store.isHydrated, actions]
   );
 
   return <EventContext.Provider value={value}>{children}</EventContext.Provider>;
